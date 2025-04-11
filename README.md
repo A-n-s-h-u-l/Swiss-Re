@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Order Service with Transactional Outbox and Kafka Integration
 
 This Spring Boot project demonstrates a **transactional outbox pattern** to ensure reliable message delivery when placing an order. Events are stored in the database before being published to Kafka, ensuring **strong consistency** between DB state and event dispatch.
@@ -124,3 +125,6 @@ Client --> Service A (Controller)
             [Call Service B]
                    |
                Update Status
+=======
+# Swiss-Re
+>>>>>>> 66f216e23b0e38090c249711d83b082f3f65569f
