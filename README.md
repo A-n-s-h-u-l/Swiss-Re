@@ -1,140 +1,140 @@
 # Order Service with Transactional Outbox and Kafka Integration
 
-This Spring Boot project demonstrates a **transactional outbox pattern** to ensure reliable message delivery when placing an order. Events are stored in the database before being published to Kafka.
+This Spring Boot project implements a **Transactional Outbox Pattern** for reliable event-driven communication. It ensures **strong consistency** between local database state and Kafka event publishing when placing an order.
 
 ---
 
 ## ✅ Features
 
 - Order placement with product stock locking
-- Transactional outbox event storage
-- Kafka event publishing via retryable scheduler
-- Retry logic for downstream notification delivery
-- Dead-letter handling for notification failures
-- WebClient-based async notification to downstream service
+- Transactional outbox for guaranteed event delivery
+- Kafka publishing with retryable scheduled jobs
+- Asynchronous downstream notifications
+- Dead-letter handling for failed notifications
 
 ---
 
-## 📦 Technologies
+## 📦 Tech Stack
 
-| **Technology**       | **Description**               |
-|-----------------------|-------------------------------|
-| **Java 17+**          | Programming language         |
-| **Spring Boot**       | Backend framework            |
-| **JPA**               | ORM for database operations  |
-| **Kafka**             | Event streaming platform     |
-| **KafkaTemplate**     | Kafka integration in Spring  |
-| **MySQL/PostgreSQL**  | Relational database          |
-| **WebClient**         | Async HTTP client            |
+- Java 17+, Spring Boot
+- JPA (MySQL/PostgreSQL)
+- Kafka, KafkaTemplate
+- WebClient (asynchronous HTTP)
+- Docker & Docker Compose
 
 ---
 
 ## 📘 Flow Overview
 
-1. **OrderController** receives a new order.
-2. **OrderService**:
-   - Locks product stock with `PESSIMISTIC_WRITE`.
-   - Deducts stock and saves the order.
-   - Serializes and stores `OutboxEvent` in the DB (same transaction).
-3. **OutboxKafkaPublisher**:
-   - Scheduled job picks unprocessed `ORDER_CREATED` events.
-   - Sends to Kafka topic `order-notifications`.
-   - Marks event as processed on success.
-4. **NotificationConsumer**:
-   - Consumes from Kafka.
-   - Asynchronously calls `http://localhost:8080/notify`.
-   - On success, logs `NOTIFY_SUCCESS` event.
-   - On failure (3 retries), logs `NOTIFY_FAILED` event.
-5. **OutboxRetryScheduler**:
-   - Scheduled job re-attempts failed notifications.
+1. **POST /order** receives new order request
+2. `OrderService`:
+   - Locks stock with `PESSIMISTIC_WRITE`
+   - Saves the order & writes `OutboxEvent` in the same DB transaction
+3. `OutboxKafkaPublisher` (Scheduled)
+   - Picks unprocessed `ORDER_CREATED` events
+   - Sends to Kafka (`order-notifications`)
+   - Marks event as processed
+4. `NotificationConsumer`:
+   - Consumes Kafka events
+   - Calls `POST /notify` asynchronously
+   - On success → logs `NOTIFY_SUCCESS`
+   - On failure (3 retries) → logs `NOTIFY_FAILED`
+5. `OutboxRetryScheduler`:
+   - Periodically retries failed notifications
 
 ---
 
-## 🌐 API Endpoints
+## 🛠️ API Endpoints
 
-### 1. Place an Order
-**POST** `/order`
-
+### **POST** `/order`
 ```json
 {
   "userId": 1,
   "productIds": [1, 2, 3]
 }
+```
 
-2. Notify Service
-
-POST /notify
-
-JSON
+### **POST** `/notify`
+```json
 {
   "request": ""
 }
-✅ Non-Functional Requirements
+```
 
-1. Reliability
+---
 
-Outbox pattern ensures events are never lost, even if Kafka or /notify is down.
-Kafka acts as a durable buffer, decoupling placeOrder from notification delivery.
-/notify is retried asynchronously with capped retries and scheduled fallback via OutboxRetryScheduler.
-2. Performance
+## 🔧 Non-Functional Requirements
 
-Async notification avoids blocking the main request.
-Kafka handles massive throughput efficiently.
-Retries are isolated from the main user flow, keeping latency low.
-Frequent full table scans on the outbox_event table can degrade performance as it grows, so create an index on processed, eventType, and optionally createdAt. Fetch events in batches.
-3. Low Latency
+### 1. Reliability
+- Events never lost: outbox ensures message durability
+- Kafka acts as buffer between order creation & notification
+- Retries handled with fallback scheduler
 
-User request (/order) completes fast without waiting for /notify.
-Kafka-based fanout is fast and scalable.
-✅ Transactional Boundaries in Service A
+### 2. Performance
+- Notifications are async, keeping `/order` fast
+- Kafka scales linearly
+- Indexed `outbox_event` table avoids performance issues
 
-Transactional boundaries should encapsulate all DB operations in Service A. The REST call to Service B should be outside this boundary to avoid long-running transactions. Use a pattern like:
+### 3. Low Latency
+- `/order` returns fast
+- Kafka + async handling ensure minimal blocking
 
-Begin DB transaction.
-Perform local DB operations (e.g., persist request metadata).
-Commit transaction.
-Call Service B.
-Based on Service B’s response:
+---
 
-Update status asynchronously.
-Use a transactional outbox to ensure data consistency as Service B’s call needs to trigger further state changes.
-✅ Threading Model and Implications
+## 🔄 Transactional Boundaries in Service A
 
-Service A performs blocking I/O (e.g., REST to B), which may hold the thread. To optimize:
-Use WebClient (Reactor-based) for non-blocking I/O.
-✅ Failure Scenarios
+- Begin DB transaction
+- Lock stock, persist order & outbox event
+- Commit transaction
+- Call Service B (e.g., notification)
+- If needed, update status via async job (using outbox)
 
-1. Network Issues Between A and B
+---
 
-a. Service B Unreachable:
+## 🧵 Threading Model
 
-Retry with exponential backoff.
-Use circuit breaker to avoid cascading failures.
-b. Timeouts/Lost Connections:
+- Spring Boot (Tomcat): request per thread
+- Use WebClient (non-blocking) for external calls
+- Reactive chain recommended to avoid thread blocking
 
-Set timeouts for WebClient.
-Log failure, update state to PENDING, and process later using a scheduled retry mechanism.
-2. Service A Crash
+---
 
-a. Possible Inconsistencies:
+## 💥 Failure Scenarios
 
-Crash before DB commit → no inconsistency.
-Crash after DB commit but before calling B → partial update.
-Crash after calling B but before response processed → uncertain final state.
-b. Reconciliation Strategy:
+### 1. Network Issues (Service A ↔ Service B)
 
-Store intent or operation state (e.g., OUTBOX, PENDING).
-On restart, a reconciliation job checks incomplete records and retries external calls or compensates.
-Use idempotent APIs between A and B to support safe reprocessing.
+- **Unreachable B**:
+  - Retry with exponential backoff
+  - Circuit breaker to prevent overload
 
-✅ Sketch Diagram
+- **Timeouts**:
+  - WebClient timeouts set
+  - Update status to `PENDING` and retry
 
-Client --> Service A (Controller)
-                   |
-                   v
-              Transactional Service
-              | DB Commit |
-                   |
-            [Call Service B]
-                   |
-               Update Status
+### 2. Service A Crash
+
+- **Before DB Commit** → safe
+- **After DB Commit, before Service B call** → outbox enables replay
+- **After Service B call** → idempotent APIs and reconciliation jobs recover safely
+
+### Reconciliation Strategy
+- Use statuses like `PENDING`, `FAILED`
+- Scheduler checks incomplete flows and reprocesses
+- Idempotent external APIs ensure safe replays
+
+---
+
+## 📝 System Sketch
+
+```
+Client → [Service A: Controller]
+                |
+                ↓
+     [Transactional Service Layer]
+           | DB Commit |
+                ↓
+        [Call Service B (/notify)]
+                ↓
+         [Async Status Update]
+```
+
