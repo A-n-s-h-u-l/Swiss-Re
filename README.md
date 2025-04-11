@@ -45,7 +45,7 @@ This Spring Boot project demonstrates a **transactional outbox pattern** to ensu
 
 ---
 
-## API
+##API
 
 *POST* /order
 
@@ -63,39 +63,42 @@ This can be a other microservice as well
   "request": "",
 }
 
-## Other Requirements
-✅ Reliability
+---
+## ✅ Non Functional Requirements:
+1. Reliability
    - Outbox pattern ensures events are never lost, even if Kafka or /notify is down.
    - Kafka acts as a durable buffer, decoupling -  placeOrder from notification delivery.
    - /notify is retried asynchronously with capped retries and scheduled fallback via OutboxRetryScheduler.
 
-✅ Performance
+2. Performance
    - Async notification avoids blocking the main request.
    - Kafka handles massive throughput efficiently.
    - Retries are isolated from main user flow, keeping latency low.
    - frequent full table scans on the outbox_event table can degrade performance as it grows so create index on processed, eventType, and optionally createdAt and fetch events in batches 
 
-✅ Low Latency
+3. Low Latency
    - User request (/order) completes fast without waiting for /notify.
    - Kafka-based fanout is fast and scalable.
 
-✅ Transactional Boundaries in Service A
-- Transactional boundaries should encapsulate all DB operations in Service A. The REST call to Service B should be outside this boundary to avoid long-running transactions. Use a pattern like:
+---
+
+## ✅ Transactional Boundaries in Service A
+1. Transactional boundaries should encapsulate all DB operations in Service A. The REST call to Service B should be outside this boundary to avoid long-running transactions. Use a pattern like:
 
    - Begin DB transaction
    - Perform local DB operations (e.g., persist request metadata)
    - Commit transaction
    - Call Service B
 
-- Based on Service B’s response:
+2. Based on Service B’s response:
    - Update status asynchronously
    - Use transactional outbox to ensure data       consistency as Service B’s call needs to trigger further state change.
 
-✅ Threading Model and Implications
+## ✅ Threading Model and Implications
 - Service A performs blocking I/O (e.g., REST to B), it may hold the thread. To optimize: Use WebClient (Reactor-based) for non-blocking I/O.
 
-✅ Failure Scenarios
-- Network Issues Between A and B
+## ✅ Failure Scenarios
+1. Network Issues Between A and B
    a. Service B Unreachable:
    - Retry with exponential backoff
    - Circuit breaker to avoid cascading failures
@@ -104,7 +107,7 @@ This can be a other microservice as well
    - Set timeouts for WebClient
    - Log failure, update state to PENDING, and process later using a scheduled retry mechanism
 
-(2) Service A Crash
+2. Service A Crash
    a. Possible Inconsistencies:
    - Crash before DB commit → no inconsistency
    - Crash after DB commit but before calling B → partial update
@@ -115,7 +118,7 @@ This can be a other microservice as well
    - On restart, a reconciliation job checks incomplete records and retries external calls or compensates
    - Use idempotent APIs between A and B to support safe reprocessing
 
-✅ Sketch
+## ✅ Sketch
 Client --> Service A (Controller)
                    |
                    v
