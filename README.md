@@ -45,7 +45,7 @@ This Spring Boot project demonstrates a **transactional outbox pattern** to ensu
 
 ---
 
-##API
+## API
 
 *POST* /order
 
@@ -63,6 +63,7 @@ This can be a other microservice as well
   "request": "",
 }
 
+## Other Requirements
 ✅ Reliability
    - Outbox pattern ensures events are never lost, even if Kafka or /notify is down.
    - Kafka acts as a durable buffer, decoupling -  placeOrder from notification delivery.
